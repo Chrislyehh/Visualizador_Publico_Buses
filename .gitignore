@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# Datos
+data/gtfs/
+data/processed/
+
+# Entornos virtuales
+venv/
+.env
