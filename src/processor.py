@@ -4,42 +4,50 @@ from shapely.geometry import LineString
 import os
 
 def procesar_shapes_a_geojson(folder_input="data/gtfs", folder_output="data/processed"):
-    """
-    Transforma el archivo shapes.txt (puntos) en un archivo GeoJSON (líneas)
-    mucho más eficiente para visualización.
-    """
-    path_shapes = os.path.join(folder_input, "shapes.txt")
+    print("🚀 INICIANDO PROCESADOR VERSION 3.0 (SUPER MERGE)")
     
-    if not os.path.exists(path_shapes):
-        print("❌ No se encontró shapes.txt. ¿Corriste el scraper primero?")
-        return
+    # Rutas de archivos
+    f_shapes = os.path.join(folder_input, "shapes.txt")
+    f_trips = os.path.join(folder_input, "trips.txt")
+    f_routes = os.path.join(folder_input, "routes.txt")
+
+    # Leer archivos
+    shapes = pd.read_csv(f_shapes)
+    trips = pd.read_csv(f_trips)
+    routes = pd.read_csv(f_routes)
+
+    # UNIÓN PASO A PASO
+    # 1. Unir trips con routes
+    meta_recorridos = pd.merge(trips[['route_id', 'shape_id']], 
+                               routes[['route_id', 'route_short_name', 'route_color']], 
+                               on='route_id', how='left').drop_duplicates('shape_id')
+
+    # 2. Crear las líneas
+    shapes = shapes.sort_values(by=['shape_id', 'shape_pt_sequence'])
+    gdf_list = []
+    for sid, group in shapes.groupby('shape_id'):
+        if len(group) > 1:
+            geom = LineString(zip(group['shape_pt_lon'], group['shape_pt_lat']))
+            gdf_list.append({'shape_id': sid, 'geometry': geom})
     
-    print("⏳ Procesando rutas... esto puede tardar unos segundos.")
-    
-    # 1. Leer shapes.txt
-    # Solo leemos las columnas que necesitamos para ahorrar memoria
-    df_shapes = pd.read_csv(path_shapes, usecols=['shape_id', 'shape_pt_lat', 'shape_pt_lon', 'shape_pt_sequence'])
-    
-    # 2. Ordenar por ID de trayecto y secuencia de puntos
-    df_shapes = df_shapes.sort_values(by=['shape_id', 'shape_pt_sequence'])
-    
-    # 3. Convertir puntos en Líneas (Agrupamos por shape_id)
-    # Creamos una lista de tuplas (lon, lat) para cada trayecto
-    lines = (
-        df_shapes.groupby('shape_id')
-        .apply(lambda x: LineString(zip(x['shape_pt_lon'], x['shape_pt_lat'])))
-    )
-    
-    # 4. Crear un GeoDataFrame
-    gdf_rutas = gpd.GeoDataFrame(lines, columns=['geometry'], crs="EPSG:4326")
-    gdf_rutas = gdf_rutas.reset_index()
-    
-    # 5. Guardar el resultado
+    gdf_final = gpd.GeoDataFrame(gdf_list, crs="EPSG:4326")
+
+    # 3. EL MOMENTO DE LA VERDAD: Pegamos la metadata
+    gdf_final = gdf_final.merge(meta_recorridos, on='shape_id', how='left')
+
+    # RELLENO FORZOSO (Si esto no está, Streamlit fallará)
+    if 'route_short_name' not in gdf_final.columns:
+        gdf_final['route_short_name'] = 'DESCONOCIDO'
+    if 'route_color' not in gdf_final.columns:
+        gdf_final['route_color'] = '808080'
+
+    # Guardar
     os.makedirs(folder_output, exist_ok=True)
-    output_path = os.path.join(folder_output, "rutas_santiago.geojson")
+    ruta_destino = os.path.join(folder_output, "rutas_santiago.geojson")
     
-    # Guardamos como GeoJSON (estándar para mapas web)
-    gdf_rutas.to_file(output_path, driver='GeoJSON')
-    
-    print(f"✅ ¡Éxito! Mapa estático procesado en: {output_path}")
-    return output_path
+    # Borrar archivo viejo si existe antes de guardar
+    if os.path.exists(ruta_destino):
+        os.remove(ruta_destino)
+        
+    gdf_final.to_file(ruta_destino, driver='GeoJSON')
+    print(f"🔥 ARCHIVO GUARDADO. COLUMNAS: {gdf_final.columns.tolist()}")

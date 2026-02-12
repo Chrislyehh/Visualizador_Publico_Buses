@@ -1,0 +1,2 @@
+from src.processor import procesar_shapes_a_geojson
+procesar_shapes_a_geojson()
